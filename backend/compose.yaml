@@ -1,0 +1,9 @@
+services:
+  psql-db:
+    image: postgres
+    environment:
+      POSTGRES_DB: cookapp
+      POSTGRES_USER:
+      POSTGRES_PASSWORD:
+    ports:
+      - "5433:5432"

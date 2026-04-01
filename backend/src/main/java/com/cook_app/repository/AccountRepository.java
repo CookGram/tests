@@ -1,0 +1,14 @@
+package com.cook_app.repository;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Optional;
+import com.cook_app.entieties.Account;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface AccountRepository extends JpaRepository<Account, Long> {
+    Optional<Account> findByLogin(String login);
+    Optional<Account> findByEmail(String email);
+}
+

@@ -1,0 +1,116 @@
+name: backend-ci
+
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      JWT_SECRET_ACCESS: ${{ secrets.JWT_SECRET_ACCESS }}
+      JWT_SECRET_REFRESH: ${{ secrets.JWT_SECRET_REFRESH }}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/cookapp
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: cookapp
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d cookapp"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "22"
+          cache: gradle
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Run tests + JaCoCo report
+        run: ./gradlew test jacocoTestReport --no-daemon
+
+      - name: Publish test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: |
+            build/reports/tests/test
+            build/test-results/test
+
+      - name: Publish coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jacoco-report
+          path: |
+            build/reports/jacoco/test/html
+            build/reports/jacoco/test/jacocoTestReport.xml
+
+      - name: Coverage summary (JaCoCo)
+        if: always()
+        run: |
+          python - << 'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          xml_path = Path("build/reports/jacoco/test/jacocoTestReport.xml")
+          if not xml_path.exists():
+              print("JaCoCo XML not found:", xml_path)
+              raise SystemExit(0)
+
+          tree = ET.parse(xml_path)
+          root = tree.getroot()
+
+          counters = root.findall("counter")
+          instr = next((c for c in counters if c.attrib.get("type") == "INSTRUCTION"), None)
+          lines = next((c for c in counters if c.attrib.get("type") == "LINE"), None)
+
+          def pct(counter):
+              missed = int(counter.attrib["missed"])
+              covered = int(counter.attrib["covered"])
+              total = missed + covered
+              return (covered / total * 100.0) if total else 100.0
+
+          instr_pct = pct(instr) if instr is not None else None
+          line_pct = pct(lines) if lines is not None else None
+
+          summary = []
+          summary.append("## Backend coverage (JaCoCo)")
+          if instr_pct is not None:
+              summary.append(f"- **Instructions:** {instr_pct:.2f}%")
+          if line_pct is not None:
+              summary.append(f"- **Lines:** {line_pct:.2f}%")
+          summary.append("")
+          summary.append("Отчёт HTML лежит в артефактах ранa: `backend-jacoco-report`.")
+
+          Path("job_summary.md").write_text("\n".join(summary), encoding="utf-8")
+          print("\n".join(summary))
+
+          import os
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write("\n".join(summary) + "\n")
+          PY
