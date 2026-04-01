@@ -106,7 +106,7 @@ jobs:
           echo "Backend did not start in time"
           cat backend.log || true
           exit 1
-          
+
       - name: Start frontend
         working-directory: frontend
         run: |
@@ -115,13 +115,17 @@ jobs:
       - name: Wait for frontend
         run: |
           for i in {1..60}; do
-            if curl -fsS http://localhost:3000 > /dev/null; then
-              echo "Frontend is up"
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || true)
+
+            if [ "$STATUS" != "000" ]; then
+              echo "Frontend is up (status=$STATUS)"
               exit 0
             fi
+
             echo "Waiting for frontend..."
             sleep 5
           done
+
           echo "Frontend did not start in time"
           cat frontend.log || true
           exit 1
