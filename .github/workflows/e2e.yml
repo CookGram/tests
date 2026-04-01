@@ -110,7 +110,7 @@ jobs:
       - name: Start frontend
         working-directory: frontend
         run: |
-          nohup serve -s dist -l 3000 > ../frontend.log 2>&1 &
+          nohup serve -s build -l 3000 > ../frontend.log 2>&1 &
 
       - name: Wait for frontend
         run: |
@@ -130,14 +130,12 @@ jobs:
           cat frontend.log || true
           exit 1
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Run E2E tests
         working-directory: frontend/tests/UI
-        run: |
-          chmod +x ./gradlew || true
-          ./gradlew test \
-            -DbaseUrl=http://localhost:3000 \
-            -Dheadless=true \
-            -Dbrowser=chrome
+        run: gradle test -DbaseUrl=http://localhost:3000 -Dheadless=true -Dbrowser=chrome
 
       - name: Upload E2E reports and logs
         if: always()
