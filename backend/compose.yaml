@@ -3,7 +3,7 @@ services:
     image: postgres
     environment:
       POSTGRES_DB: cookapp
-      POSTGRES_USER:
-      POSTGRES_PASSWORD:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 1234
     ports:
       - "5433:5432"

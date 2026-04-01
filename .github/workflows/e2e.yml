@@ -13,11 +13,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -35,59 +35,129 @@ jobs:
       - name: Install static server
         run: npm install -g serve
 
-      - name: Start backend
+      - name: Start PostgreSQL container
+        working-directory: backend
+        run: |
+          docker compose up -d
+          docker compose ps
+
+      - name: Wait for PostgreSQL
+        working-directory: backend
+        run: |
+          CONTAINER_ID="$(docker compose ps -q psql-db)"
+          if [ -z "$CONTAINER_ID" ]; then
+            echo "PostgreSQL container was not created"
+            docker compose ps
+            docker compose logs psql-db
+            exit 1
+          fi
+
+          for i in {1..30}; do
+            RUNNING="$(docker inspect -f '{{.State.Running}}' "$CONTAINER_ID" 2>/dev/null || echo false)"
+            if [ "$RUNNING" = "true" ]; then
+              if docker exec "$CONTAINER_ID" pg_isready -U postgres -d cookapp; then
+                echo "PostgreSQL is ready"
+                exit 0
+              fi
+            else
+              echo "PostgreSQL container exists but is not running"
+              docker compose ps
+              docker compose logs psql-db
+              exit 1
+            fi
+
+            echo "Waiting for PostgreSQL..."
+            sleep 5
+          done
+
+          echo "PostgreSQL did not become ready in time"
+          docker compose ps
+          docker compose logs psql-db
+          exit 1
+
+      - name: Build backend
         working-directory: backend
         run: |
           chmod +x ./gradlew
-          nohup ./gradlew bootRun > ../backend.log 2>&1 &
+          ./gradlew clean bootJar
+
+      - name: Start backend
+        working-directory: backend
+        run: |
+          nohup java \
+            -Dspring.datasource.url=jdbc:postgresql://localhost:5433/cookapp \
+            -jar build/libs/cook-app-0.0.1-SNAPSHOT.jar > ../backend.log 2>&1 &
 
       - name: Wait for backend
         run: |
           for i in {1..60}; do
-            if curl -fsS http://localhost:8080/actuator/health > /dev/null || curl -fsS http://localhost:8080 > /dev/null; then
-              echo "Backend is up"
+            STATUS_ACTUATOR=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health || true)
+            STATUS_ROOT=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || true)
+
+            if [ "$STATUS_ACTUATOR" != "000" ] || [ "$STATUS_ROOT" != "000" ]; then
+              echo "Backend is up (actuator=$STATUS_ACTUATOR, root=$STATUS_ROOT)"
               exit 0
             fi
+
             echo "Waiting for backend..."
             sleep 5
           done
+
           echo "Backend did not start in time"
+          cat backend.log || true
           exit 1
 
       - name: Start frontend
         working-directory: frontend
         run: |
-          nohup serve -s dist -l 3000 > ../frontend.log 2>&1 &
+          nohup serve -s build -l 3000 > ../frontend.log 2>&1 &
 
       - name: Wait for frontend
         run: |
           for i in {1..60}; do
-            if curl -fsS http://localhost:3000 > /dev/null; then
-              echo "Frontend is up"
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || true)
+
+            if [ "$STATUS" != "000" ]; then
+              echo "Frontend is up (status=$STATUS)"
               exit 0
             fi
+
             echo "Waiting for frontend..."
             sleep 5
           done
+
           echo "Frontend did not start in time"
+          cat frontend.log || true
           exit 1
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v1    
+        
       - name: Run E2E tests
         working-directory: frontend/tests/UI
         run: |
-          chmod +x ./gradlew || true
-          ./gradlew test \
+          gradle test \
             -DbaseUrl=http://localhost:3000 \
             -Dheadless=true \
-            -Dbrowser=chrome
-
+            -Dbrowser=chrome \
+            -Dchromeoptions.args="--no-sandbox,--disable-dev-shm-usage,--headless=new"
+            
       - name: Upload E2E reports and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-reports
+          if-no-files-found: ignore
           path: |
             frontend/tests/UI/build/reports/tests/test
             frontend/tests/UI/build/test-results/test
             backend.log
             frontend.log
+
+      - name: Stop containers
+        if: always()
+        working-directory: backend
+        run: docker compose down
