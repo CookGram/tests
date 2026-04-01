@@ -1,0 +1,93 @@
+name: E2E tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install static server
+        run: npm install -g serve
+
+      - name: Start backend
+        working-directory: backend
+        run: |
+          chmod +x ./gradlew
+          nohup ./gradlew bootRun > ../backend.log 2>&1 &
+
+      - name: Wait for backend
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8080/actuator/health > /dev/null || curl -fsS http://localhost:8080 > /dev/null; then
+              echo "Backend is up"
+              exit 0
+            fi
+            echo "Waiting for backend..."
+            sleep 5
+          done
+          echo "Backend did not start in time"
+          exit 1
+
+      - name: Start frontend
+        working-directory: frontend
+        run: |
+          nohup serve -s dist -l 3000 > ../frontend.log 2>&1 &
+
+      - name: Wait for frontend
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3000 > /dev/null; then
+              echo "Frontend is up"
+              exit 0
+            fi
+            echo "Waiting for frontend..."
+            sleep 5
+          done
+          echo "Frontend did not start in time"
+          exit 1
+
+      - name: Run E2E tests
+        working-directory: frontend/tests/UI
+        run: |
+          chmod +x ./gradlew || true
+          ./gradlew test \
+            -DbaseUrl=http://localhost:3000 \
+            -Dheadless=true \
+            -Dbrowser=chrome
+
+      - name: Upload E2E reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-reports
+          path: |
+            frontend/tests/UI/build/reports/tests/test
+            frontend/tests/UI/build/test-results/test
+            backend.log
+            frontend.log
