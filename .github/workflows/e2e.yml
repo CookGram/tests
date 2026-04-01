@@ -48,18 +48,19 @@ jobs:
           if [ -z "$CONTAINER_ID" ]; then
             echo "PostgreSQL container was not created"
             docker compose ps
-            docker compose logs
+            docker compose logs psql-db
             exit 1
           fi
 
           for i in {1..30}; do
-            if docker ps --format '{{.ID}}' | grep -q "^${CONTAINER_ID}$"; then
+            RUNNING="$(docker inspect -f '{{.State.Running}}' "$CONTAINER_ID" 2>/dev/null || echo false)"
+            if [ "$RUNNING" = "true" ]; then
               if docker exec "$CONTAINER_ID" pg_isready -U postgres -d cookapp; then
                 echo "PostgreSQL is ready"
                 exit 0
               fi
             else
-              echo "PostgreSQL container is not running"
+              echo "PostgreSQL container exists but is not running"
               docker compose ps
               docker compose logs psql-db
               exit 1
