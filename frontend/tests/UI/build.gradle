@@ -18,4 +18,27 @@ dependencies {
 
 test {
     useJUnitPlatform()
+
+    systemProperty "baseUrl", System.getProperty("baseUrl", "http://localhost:3000")
+    systemProperty "browser", System.getProperty("browser", "chrome")
+    systemProperty "headless", System.getProperty("headless", "true")
+
+    testLogging {
+        events "started", "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+        showStandardStreams = true
+    }
+
+    afterTest { descriptor, result ->
+        println "TEST ${descriptor.className} > ${descriptor.name} : ${result.resultType}"
+    }
+
+    afterSuite { descriptor, result ->
+        if (!descriptor.parent) {
+            println "SUMMARY: ${result.testCount} tests, ${result.successfulTestCount} passed, ${result.failedTestCount} failed, ${result.skippedTestCount} skipped"
+        }
+    }
 }
