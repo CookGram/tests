@@ -37,20 +37,41 @@ jobs:
 
       - name: Start PostgreSQL container
         working-directory: backend
-        run: docker compose up -d
+        run: |
+          docker compose up -d
+          docker compose ps
 
       - name: Wait for PostgreSQL
+        working-directory: backend
         run: |
+          CONTAINER_ID="$(docker compose ps -q psql-db)"
+          if [ -z "$CONTAINER_ID" ]; then
+            echo "PostgreSQL container was not created"
+            docker compose ps
+            docker compose logs
+            exit 1
+          fi
+
           for i in {1..30}; do
-            if docker exec $(docker ps -q --filter "ancestor=postgres") pg_isready -U postgres -d cookapp; then
-              echo "PostgreSQL is ready"
-              exit 0
+            if docker ps --format '{{.ID}}' | grep -q "^${CONTAINER_ID}$"; then
+              if docker exec "$CONTAINER_ID" pg_isready -U postgres -d cookapp; then
+                echo "PostgreSQL is ready"
+                exit 0
+              fi
+            else
+              echo "PostgreSQL container is not running"
+              docker compose ps
+              docker compose logs psql-db
+              exit 1
             fi
+
             echo "Waiting for PostgreSQL..."
             sleep 5
           done
-          echo "PostgreSQL did not start in time"
-          docker ps
+
+          echo "PostgreSQL did not become ready in time"
+          docker compose ps
+          docker compose logs psql-db
           exit 1
 
       - name: Build backend
