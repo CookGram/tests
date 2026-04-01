@@ -91,17 +91,22 @@ jobs:
       - name: Wait for backend
         run: |
           for i in {1..60}; do
-            if curl -fsS http://localhost:8080/actuator/health > /dev/null || curl -fsS http://localhost:8080 > /dev/null; then
-              echo "Backend is up"
+            STATUS_ACTUATOR=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health || true)
+            STATUS_ROOT=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || true)
+
+            if [ "$STATUS_ACTUATOR" != "000" ] || [ "$STATUS_ROOT" != "000" ]; then
+              echo "Backend is up (actuator=$STATUS_ACTUATOR, root=$STATUS_ROOT)"
               exit 0
             fi
+
             echo "Waiting for backend..."
             sleep 5
           done
+
           echo "Backend did not start in time"
           cat backend.log || true
           exit 1
-
+          
       - name: Start frontend
         working-directory: frontend
         run: |
